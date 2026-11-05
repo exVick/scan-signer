@@ -28,6 +28,11 @@ from reportlab.pdfgen import canvas
 
 OCR_DPI = 200
 PX_PER_MM = OCR_DPI / 25.4
+SUPPORTED_LANGS = {"bul": "Bulgarian", "deu": "German", "eng": "English"}
+
+# Cyrillic letters that look like Latin ones. OCR reading several languages at once
+# often swaps them, so both the clue and the scanned words are compared in Latin form.
+LOOKALIKES = str.maketrans("аеорсухкмтнвіј", "aeopcyxkmthbij")
 
 
 def _overlay(width_pt, height_pt, draw):
@@ -75,7 +80,26 @@ def make_grid(input_pdf, output_pdf):
 
 
 def _norm(word):
-    return re.sub(r"\W", "", word.lower())
+    return re.sub(r"\W", "", word.lower()).translate(LOOKALIKES)
+
+
+def resolve_lang(lang):
+    """Return the OCR language string to use, checking that its languages are installed.
+
+    With no `lang`, every installed language out of Bulgarian, German and English is used.
+    """
+    installed = set(pytesseract.get_languages())
+    if lang is None:
+        langs = [code for code in SUPPORTED_LANGS if code in installed]
+        if not langs:
+            raise SystemExit("No OCR language is installed. Install one, e.g.: "
+                             "sudo apt install tesseract-ocr-eng tesseract-ocr-deu tesseract-ocr-bul")
+        return "+".join(langs)
+    missing = [code for code in lang.split("+") if code not in installed]
+    if missing:
+        raise SystemExit(f"OCR language(s) not installed: {', '.join(missing)}. "
+                         f"Install with: sudo apt install {' '.join('tesseract-ocr-' + m for m in missing)}")
+    return lang
 
 
 def _find_clue(img, clue, lang):
@@ -138,8 +162,9 @@ def _find_line_above(img, clue_box):
     return None
 
 
-def find_spot(input_pdf, clue, page_no, match, lang):
+def find_spot(input_pdf, clue, page_no, match, lang=None):
     """OCR the page(s) and return (page_no, line_left_mm, line_right_mm, line_y_mm, found_line)."""
+    lang = resolve_lang(lang)
     pdf = pdfium.PdfDocument(input_pdf)
     pages = range(len(pdf)) if page_no is None else [page_no - 1 if page_no > 0 else len(pdf) - 1]
     hits = []
@@ -207,7 +232,8 @@ def main():
     p.add_argument("--below", metavar="TEXT", help="Find the signature line just above this printed text.")
     p.add_argument("--match", type=int, help="With --below: which match to use if the text appears more than once "
                                              "(default: the first one with a line above it).")
-    p.add_argument("--lang", default="deu+eng", help="With --below: OCR language(s), e.g. eng, deu or deu+eng (default: deu+eng).")
+    p.add_argument("--lang", help="With --below: OCR language(s), e.g. bul, deu, eng or bul+eng "
+                                  "(default: every installed one of bul, deu and eng).")
     p.add_argument("--page", type=int, help="Page number, starting at 1, -1 = last "
                                             "(default: last page; with --below, all pages are searched).")
     p.add_argument("--x", type=float, help="Left edge of the signature, mm from the page's left edge.")

@@ -2,7 +2,7 @@
 
 Put your signature on a scanned PDF without printing, signing and scanning it all over again.
 
-Tell scan-signer which words are printed under the signature line, for example "Signature of Tenant" or "Unterschrift des Mieters". It reads the scan, finds those words and the line above them, and places your signature on the line. If you prefer to pick the spot yourself, you can do that too.
+Tell scan-signer which words are printed under the signature line, for example "Signature of Tenant", "Unterschrift des Mieters" or "Подпис на купувача". It reads the scan, finds those words and the line above them, and places your signature on the line. If you prefer to pick the spot yourself, you can do that too.
 
 Everything happens on your own computer. Your documents and your signature are never uploaded anywhere.
 
@@ -15,7 +15,7 @@ What scan-signer adds:
 - **Works on scans.** It reads the page image with OCR (Tesseract), so no text layer is needed.
 - **Finds the line for you.** It looks for the printed line just above your clue text, even when the scan is slightly tilted or a little noisy.
 - **Picks the right spot.** It skips your clue words when they also appear in the body text, and it ignores a neighbouring signature line on the same height.
-- **German and English** out of the box, with tolerance for small reading mistakes. Umlauts and ß work.
+- **Bulgarian, German and English**, with tolerance for small reading mistakes. Umlauts, ß and Cyrillic all work, and Cyrillic letters that OCR mistakes for look-alike Latin ones (а and a, о and o, р and p) still match.
 - **Keeps your signature's proportions** and sizes it to fit the line.
 - **Manual mode with a millimetre grid** for anything automatic detection can't handle.
 - **Signs only the page you ask for** and leaves your original file untouched.
@@ -25,8 +25,10 @@ What scan-signer adds:
 You need Python 3.10 or newer and Tesseract with the languages you want. On Ubuntu or Kubuntu:
 
 ```bash
-sudo apt install tesseract-ocr tesseract-ocr-deu    # deu = German, English is included
+sudo apt install tesseract-ocr tesseract-ocr-deu tesseract-ocr-bul    # German and Bulgarian; English is included
 ```
+
+You only need the languages your documents are written in. scan-signer uses whichever of Bulgarian, German and English are installed.
 
 Then install scan-signer into its own environment:
 
@@ -51,6 +53,12 @@ scan-signer "contract.pdf" -s "signature.png" --below "Unterschrift des Mieters"
 - `-s`: your signature image. A PNG with a transparent background looks best. A white background would cover part of the page.
 - `--below`: a few words printed under the signature line. A distinctive part of the label is enough.
 - `--page`: the page to sign, counting from 1. Leave it out and every page is searched.
+
+For a Bulgarian document it works just the same:
+
+```bash
+scan-signer "dogovor.pdf" -s "signature.png" --below "Подпис на купувача"
+```
 
 It tells you what it found and writes `contract_signed.pdf` next to the original:
 
@@ -84,7 +92,7 @@ scan-signer "contract.pdf" -s "signature.png" --page 2 --x 30 --y 240 --width 50
 | `--width 45` | Signature width in millimetres |
 | `--match 1` | Use another match when the clue appears more than once |
 | `-o out.pdf` | Choose the output file name |
-| `--lang eng` | OCR language(s); the default is `deu+eng` |
+| `--lang bul` | OCR language(s), e.g. `bul`, `deu+eng`; the default is every installed one of `bul`, `deu` and `eng`. Naming only the document's language makes reading a little faster and more reliable. |
 
 To sign several places, run it again on the output of the previous run:
 

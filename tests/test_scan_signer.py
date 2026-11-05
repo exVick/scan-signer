@@ -1,5 +1,6 @@
 import shutil
 import sys
+from pathlib import Path
 
 import numpy as np
 import pypdfium2 as pdfium
@@ -19,6 +20,28 @@ def _have_tesseract_langs(*langs):
 
 needs_ocr = pytest.mark.skipif(not _have_tesseract_langs("deu", "eng"),
                                reason="Tesseract with German and English is not installed")
+needs_bulgarian = pytest.mark.skipif(not _have_tesseract_langs("bul"),
+                                     reason="Tesseract's Bulgarian language pack is not installed")
+
+CYRILLIC_FONTS = [
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+    "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+]
+
+
+def _cyrillic_font(size):
+    for path in CYRILLIC_FONTS:
+        if Path(path).exists():
+            return ImageFont.truetype(path, size)
+    pytest.skip("No font with Cyrillic letters found")
+
+
+def _to_scan(img, rng):
+    """Tilt, blur and add noise so a clean drawing looks like a scanned page."""
+    img = img.rotate(0.8, fillcolor=242, resample=Image.BICUBIC).filter(ImageFilter.GaussianBlur(0.8))
+    a = np.asarray(img).astype(int) + rng.normal(0, 10, img.size[::-1]).astype(int)
+    return Image.fromarray(np.clip(a, 0, 255).astype("uint8")).convert("RGB")
 
 
 @pytest.fixture(scope="module")
@@ -48,9 +71,33 @@ def scan(tmp_path_factory):
             d.text((950, 1715), "Unterschrift der Vermieterin", fill=10, font=label)
         if p == 2:
             d.text((180, 1950), "Zeuge", fill=10, font=label)
-        img = img.rotate(0.8, fillcolor=242, resample=Image.BICUBIC).filter(ImageFilter.GaussianBlur(0.8))
-        a = np.asarray(img).astype(int) + rng.normal(0, 10, (2200, 1700)).astype(int)
-        pages.append(Image.fromarray(np.clip(a, 0, 255).astype("uint8")).convert("RGB"))
+        pages.append(_to_scan(img, rng))
+    pages[0].save(path, save_all=True, append_images=pages[1:], resolution=200)
+    return path
+
+
+@pytest.fixture(scope="module")
+def bulgarian_scan(tmp_path_factory):
+    """A 2-page Bulgarian 'scan': page 2 has buyer and seller lines side by side,
+    and the buyer's clue also appears in the body text above them."""
+    path = tmp_path_factory.mktemp("scan_bg") / "dogovor.pdf"
+    rng = np.random.default_rng(1)
+    label, body = _cyrillic_font(30), _cyrillic_font(26)
+    pages = []
+    for p in range(2):
+        img = Image.new("L", (1700, 2200), 242)
+        d = ImageDraw.Draw(img)
+        d.text((150, 150), f"ДОГОВОР ЗА ПОКУПКО-ПРОДАЖБА - страница {p + 1}", fill=20, font=_cyrillic_font(40))
+        for i in range(20):
+            text = ("Договорът влиза в сила след подпис на купувача и продавача."
+                    if i == 4 and p == 1 else "Страните се съгласяват с всички условия на настоящия договор.")
+            d.text((150, 260 + i * 48), text, fill=40, font=body)
+        if p == 1:
+            d.line((180, 1700, 700, 1700), fill=10, width=3)
+            d.text((180, 1715), "Дата и подпис на купувача", fill=10, font=label)
+            d.line((950, 1700, 1500, 1700), fill=10, width=3)
+            d.text((950, 1715), "Подпис на продавача", fill=10, font=label)
+        pages.append(_to_scan(img, rng))
     pages[0].save(path, save_all=True, append_images=pages[1:], resolution=200)
     return path
 
@@ -100,6 +147,28 @@ def test_falls_back_to_above_the_text_when_there_is_no_line(scan):
 def test_reports_missing_clue(scan):
     with pytest.raises(SystemExit, match="Could not find"):
         find_spot(scan, "Bürgschaft", None, None, "deu+eng")
+
+
+@needs_bulgarian
+def test_bulgarian_clue_finds_its_own_line(bulgarian_scan):
+    page, left, right, _, found = find_spot(bulgarian_scan, "подпис на купувача", 2, None)
+    assert (page, found) == (2, True)
+    assert left == pytest.approx(TENANT_LINE[0], abs=4)
+    assert right == pytest.approx(TENANT_LINE[1], abs=4)
+
+    page, left, right, _, found = find_spot(bulgarian_scan, "Подпис на продавача", None, None)
+    assert (page, found) == (2, True)
+    assert left == pytest.approx(LANDLORD_LINE[0], abs=4)
+
+
+def test_cyrillic_lookalikes_compare_equal():
+    # "Подпис" typed in Cyrillic and the same word with OCR's Latin o and c.
+    assert cli._norm("Подпис:") == cli._norm("Пoдпиc")
+
+
+def test_missing_language_is_reported():
+    with pytest.raises(SystemExit, match="tesseract-ocr-xxx"):
+        cli.resolve_lang("eng+xxx")
 
 
 def test_sign_changes_only_the_chosen_page(scan, signature, tmp_path):
