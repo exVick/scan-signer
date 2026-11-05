@@ -1,0 +1,39 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "scan-signer"
+version = "0.1.0"
+description = "Place a signature image on a scanned PDF, finding the signature line automatically."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Viktor Doychev" }]
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.26",
+    "pillow>=10.0",
+    "pypdf>=4.0",
+    "pypdfium2>=4.0",
+    "pytesseract>=0.3.10",
+    "reportlab>=4.0",
+]
+keywords = ["pdf", "signature", "ocr", "scan", "tesseract"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: POSIX :: Linux",
+    "Topic :: Office/Business",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+scan-signer = "scan_signer.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/scan_signer"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

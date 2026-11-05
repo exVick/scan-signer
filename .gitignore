@@ -1,0 +1,13 @@
+# Your documents and signatures stay on your computer, never in the repository.
+*.pdf
+*.png
+*.jpg
+*.jpeg
+
+# Python
+.venv/
+__pycache__/
+*.egg-info/
+build/
+dist/
+.pytest_cache/
