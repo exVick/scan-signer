@@ -13,7 +13,7 @@ scan-signer grew out of [auto-signer](https://github.com/Cynsar-Capital/auto-sig
 What scan-signer adds:
 
 - **Works on scans.** It reads the page image with OCR (Tesseract), so no text layer is needed.
-- **Finds the line for you.** It looks for the printed line just above your clue text, even when the scan is slightly tilted or a little noisy.
+- **Finds the line for you.** It looks for the line just above your clue text, even when the scan is slightly tilted or a little noisy. Solid lines and underscores work, and so do dotted lines made of dots, ellipses or dashes ("..........", "…………", "- - - -").
 - **Picks the right spot.** It skips your clue words when they also appear in the body text, and it ignores a neighbouring signature line on the same height.
 - **Bulgarian, German and English**, with tolerance for small reading mistakes. Umlauts, ß and Cyrillic all work, and Cyrillic letters that OCR mistakes for look-alike Latin ones (а and a, о and o, р and p) still match.
 - **Keeps your signature's proportions** and sizes it to fit the line.
@@ -33,7 +33,7 @@ You only need the languages your documents are written in. scan-signer uses whic
 Then install scan-signer into its own environment:
 
 ```bash
-git clone <your repository URL> scan-signer
+git clone https://github.com/exVick/scan-signer.git
 cd scan-signer
 python3 -m venv .venv
 source .venv/bin/activate
@@ -104,7 +104,7 @@ scan-signer step1.pdf -s landlord.png --below "Signature of Landlord" -o final.p
 ### When something doesn't work
 
 - **"Could not find the text"**: try a shorter clue, such as `"Mieters"`. Check that its language is installed and included in `--lang`.
-- **No line found**: dotted lines and boxes are not detected yet. The signature is then placed just above the clue text. Use manual mode if that isn't right.
+- **No line found**: lines shorter than 25 mm and boxes are not detected. The signature is then placed just above the clue text. Use manual mode if that isn't right.
 - **Wrong spot**: look at the list of matches it prints and pick another with `--match`.
 
 ## Running the tests

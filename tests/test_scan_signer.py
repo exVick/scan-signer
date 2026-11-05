@@ -103,6 +103,24 @@ def bulgarian_scan(tmp_path_factory):
 
 
 @pytest.fixture(scope="module")
+def dotted_scan(tmp_path_factory):
+    """A 'scan' with four kinds of dotted signature lines, two side by side per row, under body
+    text that has dots of its own. "Datum" sits right under that body text with no line at all."""
+    path = tmp_path_factory.mktemp("scan_dots") / "dotted.pdf"
+    img = Image.new("L", (1700, 2200), 242)
+    d = ImageDraw.Draw(img)
+    for i in range(16):
+        d.text((150, 200 + i * 48), "Die Vertragsparteien bestätigen die Richtigkeit aller Angaben, i. d. R. ...",
+               fill=40, font=_cyrillic_font(26))
+    d.text((180, 980), "Datum", fill=10, font=_cyrillic_font(30))
+    for x, y, dots, label in DOTTED_ROWS:
+        d.text((x, y), dots, fill=10, font=_cyrillic_font(30))
+        d.text((x, y + 60), label, fill=10, font=_cyrillic_font(30))
+    _to_scan(img, np.random.default_rng(2)).save(path, resolution=200)
+    return path
+
+
+@pytest.fixture(scope="module")
 def signature(tmp_path_factory):
     path = tmp_path_factory.mktemp("sig") / "signature.png"
     img = Image.new("RGBA", (600, 200), (0, 0, 0, 0))
@@ -114,6 +132,20 @@ def signature(tmp_path_factory):
 def _render(pdf_path):
     return [np.asarray(page.render(scale=0.5).to_pil().convert("L")) for page in pdfium.PdfDocument(pdf_path)]
 
+
+# (x px, y px, dotted line, clue) at 200 dpi; the expected extents in mm are measured from the drawing.
+DOTTED_ROWS = [
+    (180, 1150, "…" * 20, "Unterschrift des Käufers"),
+    (950, 1150, ". " * 24, "Unterschrift des Verkäufers"),
+    (180, 1500, "." * 70, "Подпис на купувача"),
+    (950, 1500, "- " * 22, "Signature of Guarantor"),
+]
+DOTTED_EXPECTED = {
+    "Unterschrift des Käufers": (22.9, 99.1, 149.4),
+    "Unterschrift des Verkäufers": (120.6, 178.8, 149.4),
+    "Подпис на купувача": (22.9, 107.6, 193.8),
+    "Signature of Guarantor": (120.6, 177.5, 193.5),
+}
 
 # The lines are drawn at 180-700 px and 950-1500 px across, 1700 px down, at 200 dpi.
 TENANT_LINE = (22.9, 88.9)
@@ -159,6 +191,24 @@ def test_bulgarian_clue_finds_its_own_line(bulgarian_scan):
     page, left, right, _, found = find_spot(bulgarian_scan, "Подпис на продавача", None, None)
     assert (page, found) == (2, True)
     assert left == pytest.approx(LANDLORD_LINE[0], abs=4)
+
+
+@needs_ocr
+@needs_bulgarian
+@pytest.mark.parametrize("clue", list(DOTTED_EXPECTED))
+def test_dotted_lines_are_found(dotted_scan, clue):
+    page, left, right, y, found = find_spot(dotted_scan, clue, 1, None)
+    assert (page, found) == (1, True)
+    exp_left, exp_right, exp_y = DOTTED_EXPECTED[clue]
+    assert left == pytest.approx(exp_left, abs=4)
+    assert right == pytest.approx(exp_right, abs=4)
+    assert y == pytest.approx(exp_y, abs=3)
+
+
+@needs_ocr
+def test_dots_in_body_text_are_not_a_line(dotted_scan):
+    *_, found = find_spot(dotted_scan, "Datum", 1, None, "deu+eng")
+    assert found is False
 
 
 def test_cyrillic_lookalikes_compare_equal():

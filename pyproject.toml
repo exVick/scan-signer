@@ -18,6 +18,7 @@ dependencies = [
     "pypdfium2>=4.0",
     "pytesseract>=0.3.10",
     "reportlab>=4.0",
+    "scipy>=1.11",
 ]
 keywords = ["pdf", "signature", "ocr", "scan", "tesseract"]
 classifiers = [
@@ -25,6 +26,10 @@ classifiers = [
     "Operating System :: POSIX :: Linux",
     "Topic :: Office/Business",
 ]
+
+[project.urls]
+Homepage = "https://github.com/exVick/scan-signer"
+Issues = "https://github.com/exVick/scan-signer/issues"
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]

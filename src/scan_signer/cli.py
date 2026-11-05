@@ -21,6 +21,7 @@ import numpy as np
 import pypdfium2 as pdfium
 import pytesseract
 from PIL import Image
+from scipy import ndimage
 from pypdf import PdfReader, PdfWriter, Transformation
 from reportlab.lib.colors import Color
 from reportlab.lib.units import mm
@@ -28,6 +29,7 @@ from reportlab.pdfgen import canvas
 
 OCR_DPI = 200
 PX_PER_MM = OCR_DPI / 25.4
+MIN_LINE_MM = 25  # shortest line accepted as a signature line
 SUPPORTED_LANGS = {"bul": "Bulgarian", "deu": "German", "eng": "English"}
 
 # Cyrillic letters that look like Latin ones. OCR reading several languages at once
@@ -123,15 +125,8 @@ def _find_clue(img, clue, lang):
     return boxes
 
 
-def _find_line_above(img, clue_box):
-    """Find the nearest long horizontal line above the clue. Returns (left, right, y) in pixels or None."""
-    gray = np.asarray(img.convert("L"))
-    left, top, right, _ = clue_box
-    x0 = max(0, int(left - 40 * PX_PER_MM))
-    x1 = min(gray.shape[1], int(right + 120 * PX_PER_MM))
-    y0 = max(0, int(top - 30 * PX_PER_MM))
-    dark = gray[y0:top, x0:x1] < 140
-
+def _solid_line(dark, left, right):
+    """Nearest long, mostly solid horizontal line over [left, right]. Returns (start, end, y) or None."""
     # Smear vertically by ~3 mm so a tilted scanned line still shows up in one row.
     band = max(1, int(3 * PX_PER_MM))
     smeared = np.array([dark[r:r + band].any(axis=0) for r in range(max(0, dark.shape[0] - band))])
@@ -144,12 +139,12 @@ def _find_line_above(img, clue_box):
             length = run[-1] - run[0] + 1 if len(run) else 0
             # Text rows never form a long, mostly solid run; a printed line does.
             # It must also sit over the clue, not over a neighbouring signature block.
-            over_clue = len(run) and x0 + run[0] <= right and x0 + run[-1] >= left
+            over_clue = len(run) and run[0] <= right and run[-1] >= left
             if over_clue and len(run) / max(length, 1) > 0.8 and (best is None or length > best[1] - best[0]):
                 best = (run[0], run[-1])
         return best
 
-    min_len = 25 * PX_PER_MM
+    min_len = MIN_LINE_MM * PX_PER_MM
     for r in range(len(smeared) - 1, -1, -1):  # bottom-up: the line closest to the clue wins
         run = longest_run(r)
         if run is None or run[1] - run[0] < min_len:
@@ -158,8 +153,60 @@ def _find_line_above(img, clue_box):
         candidates = [(run, r)] + [(longest_run(q), q) for q in range(r - 1, max(-1, r - band), -1)]
         (start, end), r = max(((c, q) for c, q in candidates if c), key=lambda cq: cq[0][1] - cq[0][0])
         rows = np.flatnonzero(dark[r:r + band, start:end + 1].any(axis=1))
-        return x0 + start, x0 + end, y0 + r + rows.mean()
+        return start, end, r + rows.mean()
     return None
+
+
+def _dotted_line(dark, left, right):
+    """Nearest dotted line ("..........", "…………", "- - - -") over [left, right]. Returns (start, end, y) or None."""
+    # Dots and dashes are small, flat specks; letters are taller.
+    specks = []
+    for rows, cols in ndimage.find_objects(ndimage.label(dark)[0]):
+        h, w = rows.stop - rows.start, cols.stop - cols.start
+        # Letters cut off by the edge of the search area would look like a row of specks too.
+        cut_off = rows.start == 0 or rows.stop == dark.shape[0]
+        if not cut_off and 2 <= h <= 1.2 * PX_PER_MM and 2 <= w <= 4 * PX_PER_MM:
+            specks.append((cols.start, cols.stop, (rows.start + rows.stop) / 2))
+
+    # Chain specks left to right while they stay close together and on the same height.
+    chains = []
+    for speck in sorted(specks):
+        reachable = [c for c in chains
+                     if 0 <= speck[0] - c[-1][1] <= 2.5 * PX_PER_MM and abs(speck[2] - c[-1][2]) <= 0.8 * PX_PER_MM]
+        if reachable:
+            min(reachable, key=lambda c: speck[0] - c[-1][1]).append(speck)
+        else:
+            chains.append([speck])
+
+    best = None
+    for chain in chains:
+        start, end = chain[0][0], chain[-1][1]
+        if len(chain) < 8 or end - start < MIN_LINE_MM * PX_PER_MM or start > right or end < left:
+            continue
+        # A dotted line is evenly spaced; a few stray specks in text are not.
+        gaps = np.diff([c[0] for c in chain])
+        if np.mean(np.abs(gaps - np.median(gaps)) <= 0.5 * np.median(gaps)) < 0.8:
+            continue
+        y = float(np.mean([c[2] for c in chain]))
+        if best is None or y > best[2]:  # the line closest to the clue wins
+            best = (start, end, y)
+    return best
+
+
+def _find_line_above(img, clue_box):
+    """Find the nearest solid or dotted line above the clue. Returns (left, right, y) in pixels or None."""
+    gray = np.asarray(img.convert("L"))
+    left, top, right, _ = clue_box
+    x0 = max(0, int(left - 40 * PX_PER_MM))
+    x1 = min(gray.shape[1], int(right + 120 * PX_PER_MM))
+    y0 = max(0, int(top - 30 * PX_PER_MM))
+    dark = gray[y0:top, x0:x1] < 140
+
+    found = [line for line in (_solid_line(dark, left - x0, right - x0), _dotted_line(dark, left - x0, right - x0)) if line]
+    if not found:
+        return None
+    start, end, y = max(found, key=lambda line: line[2])
+    return x0 + start, x0 + end, y0 + y
 
 
 def find_spot(input_pdf, clue, page_no, match, lang=None):
@@ -240,6 +287,9 @@ def main():
     p.add_argument("--y", type=float, help="Top edge of the signature, mm from the page's top edge.")
     p.add_argument("--width", type=float, help="Signature width in mm (default: 50, or fitted to the line with --below).")
     args = p.parse_args()
+    for path in (args.input_pdf, args.signature):
+        if path is not None and not path.is_file():
+            p.error(f"file not found: {path}")
 
     if args.grid:
         out = args.output or args.input_pdf.with_name(args.input_pdf.stem + "_grid.pdf")
